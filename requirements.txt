@@ -1,4 +1,4 @@
 requests
-pathlib 
-os
-pymupdf
+PyMuPDF
+sentence-transformers
+faiss-cpu
