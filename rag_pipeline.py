@@ -6,7 +6,12 @@ from urllib.request import Request, urlopen
 
 from pdf_processor import extract_all_pdfs
 from chunker import create_chunks
-from vector_store import build_vector_store, search_chunks
+from vector_store import (
+    build_vector_store,
+    search_chunks,
+    load_vector_store,
+    save_vector_store,
+)
 
 
 # My fallback answer when the PDFs don't contain enough information
@@ -15,33 +20,35 @@ NOT_FOUND = "Sorry, I could not find an answer to your question in the provided 
 # Minimum similarity score required before sending chunks to the LLM
 MIN_RETRIEVAL_SCORE = 0.35
 
-# Free model I'm currently using through OpenRouter
-MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+# Free model I'm currently using through OpenRouter (configurable via env)
+DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 
 def load_local_env():
-    # Read my API key from .env.local so I don't have to put it in the code
-    env_file = Path(".env")
-
-    if not env_file.exists():
-        return
-
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-
-        # Skip blank lines and comments
-        if not line or line.startswith("#") or "=" not in line:
+    # Read API key from .env or .env.local
+    base_dir = Path(__file__).resolve().parent
+    for env_name in (".env", ".env.local"):
+        env_file = base_dir / env_name
+        if not env_file.exists():
             continue
 
-        key, value = line.split("=", 1)
-        os.environ.setdefault(
-            key.strip(),
-            value.strip().strip('"').strip("'")
-        )
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+
+            # Skip blank lines and comments
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            os.environ.setdefault(
+                key.strip(),
+                value.strip().strip('"').strip("'")
+            )
 
 
 load_local_env()
 API_KEY = os.getenv("OPENROUTER_API_KEY")
+MODEL = os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL)
 
 
 def answer_question(question, chunks, index, top_k=5):
@@ -106,7 +113,7 @@ If the context does not contain enough information, reply exactly:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": 400,
+            "max_tokens": 1000,
         }).encode("utf-8"),
         method="POST",
     )
@@ -114,7 +121,15 @@ If the context does not contain enough information, reply exactly:
     with urlopen(request, timeout=60) as response:
         data = json.loads(response.read().decode("utf-8"))
 
-    answer = data["choices"][0]["message"]["content"].strip()
+    choices = data.get("choices", [])
+    if not choices:
+        return {"answer": NOT_FOUND, "sources": []}
+
+    answer = choices[0].get("message", {}).get("content", "")
+    if not answer:
+        return {"answer": NOT_FOUND, "sources": []}
+
+    answer = answer.strip()
 
     # If the model couldn't answer, don't show citations as if they support an answer
     if answer == NOT_FOUND:
@@ -144,21 +159,27 @@ if __name__ == "__main__":
     # Make sure I have added my OpenRouter key before running the pipeline
     if not API_KEY:
         raise RuntimeError(
-            "OPENROUTER_API_KEY is missing. Add it to your .env.local file."
+            "OPENROUTER_API_KEY is missing. Add it to your .env or .env.local file."
         )
 
-    # Load every PDF from the data folder, then split the text into chunks
-    pages = extract_all_pdfs()
-    chunks = create_chunks(pages)
+    # Load existing vector store if available, or build and save one
+    index, chunks = load_vector_store()
 
-    print(f"\nTotal PDF pages: {len(pages)}")
-    print(f"Total chunks: {len(chunks)}")
+    if index is None or chunks is None:
+        pages = extract_all_pdfs()
+        chunks = create_chunks(pages)
 
-    # Convert the chunks into embeddings and create the searchable index
-    index, embeddings = build_vector_store(chunks)
+        print(f"\nTotal PDF pages: {len(pages)}")
+        print(f"Total chunks: {len(chunks)}")
+
+        # Convert the chunks into embeddings and create the searchable index
+        index, embeddings = build_vector_store(chunks)
+        save_vector_store(index, chunks)
+        print("Vector store created and saved.")
+    else:
+        print("Existing vector store loaded successfully.")
 
     print(f"Total indexed chunks: {index.ntotal}")
-    print(f"Embedding dimensions: {embeddings.shape[1]}")
 
     # A few questions to test whether retrieval and answering work properly
     questions = [

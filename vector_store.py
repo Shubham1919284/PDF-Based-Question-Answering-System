@@ -1,5 +1,7 @@
 import faiss
 import numpy as np
+import pickle
+from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
 from pdf_processor import extract_all_pdfs
@@ -8,6 +10,43 @@ from chunker import create_chunks
 
 # This model converts text into numbers so we can compare its meaning
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+
+# Save my FAISS index and PDF chunks so I can reuse them later
+def save_vector_store(index, chunks, folder="vector_db"):
+    folder = Path(folder)
+    if not folder.is_absolute():
+        folder = Path(__file__).resolve().parent / folder
+    folder.mkdir(parents=True, exist_ok=True)
+
+    # Save the FAISS index
+    faiss.write_index(index, str(folder / "faiss.index"))
+
+    # Save chunks with their PDF names and page numbers
+    with open(folder / "chunks.pkl", "wb") as file:
+        pickle.dump(chunks, file)
+
+
+# Load the previously saved index and chunks
+def load_vector_store(folder="vector_db"):
+    folder = Path(folder)
+    if not folder.is_absolute():
+        folder = Path(__file__).resolve().parent / folder
+
+    index_path = folder / "faiss.index"
+    chunks_path = folder / "chunks.pkl"
+
+    if not index_path.exists() or not chunks_path.exists():
+        return None, None
+
+    # Load the saved FAISS index
+    index = faiss.read_index(str(index_path))
+
+    # Load the saved PDF chunks
+    with open(chunks_path, "rb") as file:
+        chunks = pickle.load(file)
+
+    return index, chunks
 
 
 def build_vector_store(chunks):
@@ -68,18 +107,25 @@ def search_chunks(question, chunks, index, top_k=5):
 
 
 if __name__ == "__main__":
-    # Read all PDFs and split their text into smaller chunks
-    pages = extract_all_pdfs()
-    chunks = create_chunks(pages)
+    # Check whether a saved vector store exists
+    index, chunks = load_vector_store()
 
-    print(f"Total PDF pages: {len(pages)}")
-    print(f"Total chunks: {len(chunks)}")
+    if index is None or chunks is None:
+        # Read all PDFs and split their text into smaller chunks
+        pages = extract_all_pdfs()
+        chunks = create_chunks(pages)
 
-    # Turn the chunks into embeddings and build the FAISS index
-    index, embeddings = build_vector_store(chunks)
+        print(f"Total PDF pages: {len(pages)}")
+        print(f"Total chunks: {len(chunks)}")
+
+        # Turn the chunks into embeddings and build the FAISS index
+        index, embeddings = build_vector_store(chunks)
+        save_vector_store(index, chunks)
+        print("Vector store created and saved.")
+    else:
+        print("Existing vector store loaded successfully.")
 
     print(f"Total indexed chunks: {index.ntotal}")
-    print(f"Embedding dimension: {embeddings.shape[1]}")
 
     # Try a question to see which chunks the system finds
     question = "What is the difference between supervised and unsupervised learning?"

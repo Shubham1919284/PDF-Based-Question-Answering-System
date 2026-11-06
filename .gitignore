@@ -5,4 +5,5 @@
 venv/
 __pycache__/
 *.py[cod]
-data/An_Introduction_to_Statistical_Learning_with_Applications_in_Python.pdf
+vector_db/
+data/An_Introduction_to_Statistical_Learning_with_Applications_in_Python.pdf.env.*

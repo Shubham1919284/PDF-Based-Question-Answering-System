@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 # All my PDFs are stored in this folder
-DATA_DIR = Path("data")
+DATA_DIR = Path(__file__).resolve().parent / "data"
 PDF_PATH = DATA_DIR / "sample.pdf"
 
 
