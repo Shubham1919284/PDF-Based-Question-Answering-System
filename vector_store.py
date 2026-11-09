@@ -74,6 +74,7 @@ def build_vector_store(chunks):
     return index, embeddings
 
 
+
 def search_chunks(question, chunks, index, top_k=5):
     # Convert the user's question into an embedding too
     question_embedding = model.encode(
@@ -82,28 +83,50 @@ def search_chunks(question, chunks, index, top_k=5):
         normalize_embeddings=True
     )
 
-    # Don't request more results than the index actually contains
-    top_k = min(top_k, index.ntotal)
+    # Retrieve extra candidates so we can remove duplicate pages
+    # without ending up with fewer than top_k results
+    candidate_k = min(top_k * 3, index.ntotal)
 
-    # Find the top matching chunks for this question
+    # Find the most similar chunks using FAISS
     scores, indices = index.search(
         np.asarray(question_embedding, dtype=np.float32),
-        top_k
+        candidate_k
     )
 
     results = []
+    seen_pages = set()
 
     for score, idx in zip(scores[0], indices[0]):
         # FAISS returns -1 when there is no valid result at that position
-        if idx != -1:
-            results.append({
-                "source": chunks[idx]["source"],
-                "page": chunks[idx]["page"],
-                "text": chunks[idx]["text"],
-                "score": float(score)
-            })
+        if idx == -1:
+            continue
+
+        # Get the original chunk using its FAISS index
+        chunk = chunks[idx]
+
+        # Identify each PDF page using its filename and page number
+        page_key = (chunk["source"], chunk["page"])
+
+        # Skip another chunk if this PDF page is already included
+        if page_key in seen_pages:
+            continue
+
+        seen_pages.add(page_key)
+
+        # Store the retrieved chunk along with its similarity score
+        results.append({
+            "source": chunk["source"],
+            "page": chunk["page"],
+            "text": chunk["text"],
+            "score": float(score)
+        })
+
+        # Stop once we have collected the requested number of unique pages
+        if len(results) == top_k:
+            break
 
     return results
+
 
 
 if __name__ == "__main__":

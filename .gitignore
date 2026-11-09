@@ -7,3 +7,4 @@ __pycache__/
 *.py[cod]
 vector_db/
 data/An_Introduction_to_Statistical_Learning_with_Applications_in_Python.pdf.env.*
+data/An_Introduction_to_Statistical_Learning_with_Applications_in_Python.pdf
